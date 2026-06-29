@@ -2,7 +2,8 @@ use iced::widget::{button, column, container, text_input};
 use iced::{Alignment, Element, Length, Subscription, Task, keyboard, window};
 use rand::seq::index;
 use tray_icon::{
-    menu::{Menu, MenuEvent, MenuItem},
+    event::{Event, EventReceiver},
+    menu::{Menu, MenuItem},
     TrayIconBuilder,
 };
 
@@ -35,48 +36,6 @@ enum Message {
 
 impl Default for PopupApp {
     fn default() -> Self {
-        // Spin up the Tray Icon on an independent OS thread to bypass the GTK init paradox
-        std::thread::spawn(|| {
-            // Explicitly initialize GTK on this background thread
-            #[cfg(target_os = "linux")]
-            gtk::init().expect("Failed to initialize GTK on tray thread");
-
-            let tray_menu = Menu::new();
-            let generate_item = MenuItem::new("Generate Password", true, None);
-            let _ = tray_menu.append(&generate_item);
-            let exit_item = MenuItem::new("Exit", true, None);
-            let _ = tray_menu.append(&exit_item);
-
-            let icon = load_icon();
-            
-            // Build the StatusNotifierItem
-            let _tray_icon = TrayIconBuilder::new()
-                .with_menu(Box::new(tray_menu))
-                .with_icon(icon)
-                .with_tooltip("Iced Generator")
-                .build()
-                .unwrap();
-
-            // Run a mini GTK event loop iteration explicitly to process D-Bus registration
-            #[cfg(target_os = "linux")]
-            loop {
-                gtk::main_iteration();
-                std::thread::sleep(std::time::Duration::from_millis(16));
-            }
-
-            #[cfg(target_os = "windows")]
-            unsafe {
-                use windows::Win32::UI::WindowsAndMessaging::*;
-                let mut msg = std::mem::zeroed();
-                // This loop blocks the thread and processes Win32 events
-                while GetMessageW(&mut msg, None, 0, 0).into() {
-                    _ = TranslateMessage(&msg);
-                    DispatchMessageW(&msg);
-                }
-            }
-        
-        });
-
         Self {
             text_content: generate_password(),
         }
@@ -142,8 +101,67 @@ impl PopupApp {
             }
         }
 
+        let tray_sub = iced::subscription::channel(
+            std::time::Duration::from_millis(16),
+            100,
+            |mut output| async move {
+                let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+                
+                std::thread::spawn(move || {
+                    #[cfg(target_os = "linux")]
+                    gtk::init().expect("Failed to initialize GTK on tray thread");
+
+                    let tray_menu = Menu::new();
+                    let _generate_item = MenuItem::new("Generate Password", true, None);
+                    let _ = tray_menu.append(&_generate_item);
+                    let exit_item = MenuItem::new("Exit", true, None);
+                    let _ = tray_menu.append(&exit_item);
+                    let exit_id = exit_item.id();
+
+                    let icon = load_icon();
+                    let _tray_icon = TrayIconBuilder::new()
+                        .with_menu(Box::new(tray_menu))
+                        .with_icon(icon)
+                        .with_tooltip("Iced Generator")
+                        .build()
+                        .unwrap();
+
+                    let event_receiver = EventReceiver::new();
+
+                    loop {
+                        #[cfg(target_os = "linux")]
+                        gtk::main_iteration();
+
+                        #[cfg(target_os = "windows")]
+                        unsafe {
+                            use windows::Win32::UI::WindowsAndMessaging::*;
+                            let mut msg = std::mem::zeroed();
+                            if PeekMessageW(&mut msg, None, 0, 0, PM_REMOVE.0) {
+                                TranslateMessage(&msg);
+                                DispatchMessageW(&msg);
+                            }
+                        }
+
+                        if let Some(event) = event_receiver.poll_iter().next() {
+                            if let Event::MenuItemClick { id, .. } = event {
+                                if id == exit_id {
+                                    let _ = tx.send(Message::Exit);
+                                }
+                            }
+                        }
+                        std::thread::sleep(std::time::Duration::from_millis(16));
+                    }
+                });
+
+                while let Some(msg) = rx.recv().await {
+                    let _ = output.send(msg).await;
+                }
+            },
+        );
+
         Subscription::batch(vec![
             keyboard::listen().filter_map(handle_hotkey),
+            tray_sub,
         ])
     }
 }
