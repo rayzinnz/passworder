@@ -129,27 +129,6 @@ impl PopupApp {
     }
 
     fn subscription(&self) -> Subscription<Message> {
-        let tray_sub = Subscription::run(|| {
-            iced::stream::channel(100, |mut output: iced::futures::channel::mpsc::Sender<Message>| async move {
-                use iced::futures::sink::SinkExt;
-                // let receiver = MenuEvent::receiver();
-                // loop {
-                //     // Check if a cross-thread menu event arrived from the tray menu receiver
-                //     if let Ok(event) = MenuEvent::receiver().recv() {
-                //         let _ = output.send(Message::TrayMenuClicked(event.id.0)).await;
-                //     }
-                //     // while let Ok(event) = receiver.try_recv() {
-                //     //     let _ = output.send(Message::TrayMenuClicked(event.id.0)).await;
-                //     // }
-                //     // tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-
-                //     if let Ok(event) = MenuEvent::receiver().recv() {
-                //         let _ = output.send(Message::TrayMenuClicked(event.id.0)).await;
-                //     }
-                // }
-            })
-        });
-
         fn handle_hotkey(event: keyboard::Event) -> Option<Message> {
             use keyboard::key;
 
@@ -164,7 +143,6 @@ impl PopupApp {
         }
 
         Subscription::batch(vec![
-            tray_sub,
             keyboard::listen().filter_map(handle_hotkey),
         ])
     }
