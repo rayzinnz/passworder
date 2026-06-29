@@ -1,5 +1,5 @@
 use iced::widget::{column, container, text_input};
-use iced::{Alignment, Element, Length, Subscription, Task};
+use iced::{Alignment, Element, Length, Subscription, Task, keyboard};
 use rand::seq::index;
 use tray_icon::{
     menu::{Menu, MenuEvent, MenuItem},
@@ -29,6 +29,7 @@ struct PopupApp {
 enum Message {
     TrayMenuClicked(String),
     TextChanged(String),
+    EscPressed,
 }
 
 impl Default for PopupApp {
@@ -85,9 +86,16 @@ impl PopupApp {
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
             Message::TrayMenuClicked(_id) => {
-                // Focus/reveal window under Hyprland when menu item clicked
+                // Show the window and then bring it to the front
                 return iced::window::latest()
+                    .and_then(|id| iced::window::set_visible(id, true))
+                    .and_then(|_| iced::window::latest())
                     .and_then(|id| iced::window::gain_focus(id));
+            }
+            Message::EscPressed => {
+                // Hide the window when ESC is pressed
+                return iced::window::latest()
+                    .and_then(|id| iced::window::set_visible(id, false));
             }
             Message::TextChanged(new_text) => {
                 self.text_content = new_text;
@@ -115,7 +123,7 @@ impl PopupApp {
     }
 
     fn subscription(&self) -> Subscription<Message> {
-        Subscription::run(|| {
+        let tray_sub = Subscription::run(|| {
             iced::stream::channel(100, |mut output: iced::futures::channel::mpsc::Sender<Message>| async move {
                 use iced::futures::sink::SinkExt;
                 loop {
@@ -126,7 +134,15 @@ impl PopupApp {
                     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
                 }
             })
-        })
+        });
+
+        Subscription::batch(vec![
+            tray_sub,
+            keyboard::on_key_press(|key, _| match key {
+                keyboard::Key::Escape => Some(Message::EscPressed),
+                _ => None,
+            }),
+        ])
     }
 }
 
@@ -169,4 +185,3 @@ fn generate_password() -> String {
 
     String::from_utf8(pwd).unwrap()
 }
-
