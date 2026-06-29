@@ -2,8 +2,7 @@ use iced::widget::{button, column, container, text_input};
 use iced::{Alignment, Element, Length, Subscription, Task, keyboard, window};
 use rand::seq::index;
 use tray_icon::{
-    event::{Event, EventReceiver},
-    menu::{Menu, MenuItem},
+    menu::{Menu, MenuItem, MenuEvent, MenuEventReceiver},
     TrayIconBuilder,
 };
 
@@ -101,11 +100,26 @@ impl PopupApp {
             }
         }
 
-        let tray_sub = iced::subscription::channel(
-            std::time::Duration::from_millis(16),
-            100,
-            |mut output| async move {
-                let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        let tray_sub = Subscription::run(|| {
+            iced::stream::channel(100, |mut output: iced::futures::channel::mpsc::Sender<Message>| async move {
+                use iced::futures::sink::SinkExt;
+                // let receiver = MenuEvent::receiver();
+                // loop {
+                //     // Check if a cross-thread menu event arrived from the tray menu receiver
+                //     if let Ok(event) = MenuEvent::receiver().recv() {
+                //         let _ = output.send(Message::TrayMenuClicked(event.id.0)).await;
+                //     }
+                //     // while let Ok(event) = receiver.try_recv() {
+                //     //     let _ = output.send(Message::TrayMenuClicked(event.id.0)).await;
+                //     // }
+                //     // tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+                //     if let Ok(event) = MenuEvent::receiver().recv() {
+                //         let _ = output.send(Message::TrayMenuClicked(event.id.0)).await;
+                //     }
+                // }
+
+                let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
                 
                 std::thread::spawn(move || {
                     #[cfg(target_os = "linux")]
@@ -126,7 +140,7 @@ impl PopupApp {
                         .build()
                         .unwrap();
 
-                    let event_receiver = EventReceiver::new();
+                    let event_receiver:&MenuEventReceiver = MenuEvent::receiver();
 
                     loop {
                         #[cfg(target_os = "linux")]
@@ -136,17 +150,15 @@ impl PopupApp {
                         unsafe {
                             use windows::Win32::UI::WindowsAndMessaging::*;
                             let mut msg = std::mem::zeroed();
-                            if PeekMessageW(&mut msg, None, 0, 0, PM_REMOVE.0) {
-                                TranslateMessage(&msg);
+                            if PeekMessageW(&mut msg, None, 0, 0, PM_REMOVE).into() {
+                                let _ = TranslateMessage(&msg);
                                 DispatchMessageW(&msg);
                             }
                         }
 
-                        if let Some(event) = event_receiver.poll_iter().next() {
-                            if let Event::MenuItemClick { id, .. } = event {
-                                if id == exit_id {
-                                    let _ = tx.send(Message::Exit);
-                                }
+                        if let Some(event) = event_receiver.try_iter().next() {
+                            if event.id()==exit_id {
+                                let _ = tx.send(Message::Exit);
                             }
                         }
                         std::thread::sleep(std::time::Duration::from_millis(16));
@@ -156,8 +168,10 @@ impl PopupApp {
                 while let Some(msg) = rx.recv().await {
                     let _ = output.send(msg).await;
                 }
-            },
-        );
+
+            })
+        });
+
 
         Subscription::batch(vec![
             keyboard::listen().filter_map(handle_hotkey),
