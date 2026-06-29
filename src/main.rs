@@ -1,5 +1,5 @@
-use iced::widget::{column, container, text_input};
-use iced::{Alignment, Element, Length, Subscription, Task, keyboard};
+use iced::widget::{button, column, container, text_input};
+use iced::{Alignment, Element, Length, Subscription, Task, keyboard, window};
 use rand::seq::index;
 use tray_icon::{
     menu::{Menu, MenuEvent, MenuItem},
@@ -13,8 +13,8 @@ const SPECIAL:&[u8] = "!@#$%*?:".as_bytes();
 
 pub fn main() -> iced::Result {
     iced::application(PopupApp::default, PopupApp::update, PopupApp::view)
-        .window(iced::window::Settings {
-            size: (200.0, 100.0).into(),
+        .window(window::Settings {
+            size: (300.0, 200.0).into(),
             ..Default::default()
         })
         .subscription(PopupApp::subscription)
@@ -27,9 +27,10 @@ struct PopupApp {
 
 #[derive(Debug, Clone)]
 enum Message {
+    EscPressed,
+    Exit,
     TrayMenuClicked(String),
     TextChanged(String),
-    EscPressed,
 }
 
 impl Default for PopupApp {
@@ -85,17 +86,19 @@ impl Default for PopupApp {
 impl PopupApp {
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
-            Message::TrayMenuClicked(_id) => {
-                // Show the window and then bring it to the front
-                return iced::window::latest()
-                    .and_then(|id| iced::window::set_visible(id, true))
-                    .and_then(|_| iced::window::latest())
-                    .and_then(|id| iced::window::gain_focus(id));
-            }
             Message::EscPressed => {
                 // Hide the window when ESC is pressed
-                return iced::window::latest()
-                    .and_then(|id| iced::window::set_visible(id, false));
+                return window::latest()
+                    .and_then(|id| window::set_mode(id, window::Mode::Hidden));
+            }
+            Message::Exit => {
+                return window::latest().and_then(window::close);
+            },
+            Message::TrayMenuClicked(_id) => {
+                // Show the window and then bring it to the front
+                return window::latest()
+                    .and_then::<Option<window::Id>>(|id| window::set_mode(id, window::Mode::Windowed))
+                    .and_then(|id| window::gain_focus(id));
             }
             Message::TextChanged(new_text) => {
                 self.text_content = new_text;
@@ -110,7 +113,10 @@ impl PopupApp {
             .padding(10);
 
         container(
-            column![input]
+            column![
+                input,
+                button("Exit").padding([10, 20]).on_press(Message::Exit),
+                ]
                 .spacing(10)
                 .align_x(Alignment::Center)
                 .max_width(380),
@@ -126,22 +132,40 @@ impl PopupApp {
         let tray_sub = Subscription::run(|| {
             iced::stream::channel(100, |mut output: iced::futures::channel::mpsc::Sender<Message>| async move {
                 use iced::futures::sink::SinkExt;
-                loop {
-                    // Check if a cross-thread menu event arrived from the tray menu receiver
-                    if let Ok(event) = MenuEvent::receiver().recv() {
-                        let _ = output.send(Message::TrayMenuClicked(event.id.0)).await;
-                    }
-                    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-                }
+                // let receiver = MenuEvent::receiver();
+                // loop {
+                //     // Check if a cross-thread menu event arrived from the tray menu receiver
+                //     if let Ok(event) = MenuEvent::receiver().recv() {
+                //         let _ = output.send(Message::TrayMenuClicked(event.id.0)).await;
+                //     }
+                //     // while let Ok(event) = receiver.try_recv() {
+                //     //     let _ = output.send(Message::TrayMenuClicked(event.id.0)).await;
+                //     // }
+                //     // tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+                //     if let Ok(event) = MenuEvent::receiver().recv() {
+                //         let _ = output.send(Message::TrayMenuClicked(event.id.0)).await;
+                //     }
+                // }
             })
         });
 
+        fn handle_hotkey(event: keyboard::Event) -> Option<Message> {
+            use keyboard::key;
+
+            let keyboard::Event::KeyPressed { modified_key, .. } = event else {
+                return None;
+            };
+
+            match modified_key.as_ref() {
+                keyboard::Key::Named(key::Named::Escape) => Some(Message::EscPressed),
+                _ => None,
+            }
+        }
+
         Subscription::batch(vec![
             tray_sub,
-            keyboard::on_key_press(|key, _| match key {
-                keyboard::Key::Escape => Some(Message::EscPressed),
-                _ => None,
-            }),
+            keyboard::listen().filter_map(handle_hotkey),
         ])
     }
 }
