@@ -1,4 +1,5 @@
-use iced::widget::{button, column, container, text_input};
+use helper_lib::clipboard::copy_text;
+use iced::widget::{column, container, text_input};
 use iced::{Alignment, Element, Length, Subscription, Task, keyboard, window};
 use rand::seq::index;
 use tray_icon::{
@@ -14,7 +15,8 @@ const SPECIAL:&[u8] = "!@#$%*?:".as_bytes();
 pub fn main() -> iced::Result {
     iced::application(PopupApp::default, PopupApp::update, PopupApp::view)
         .window(window::Settings {
-            size: (300.0, 200.0).into(),
+            size: (300.0, 40.0).into(),
+            decorations: false,
             ..Default::default()
         })
         .subscription(PopupApp::subscription)
@@ -29,14 +31,16 @@ struct PopupApp {
 enum Message {
     EscPressed,
     Exit,
-    TrayMenuClicked(String),
+    GenerateId,
     TextChanged(String),
 }
 
 impl Default for PopupApp {
     fn default() -> Self {
+        let pwd = generate_password();
+        copy_text(&pwd);
         Self {
-            text_content: generate_password(),
+            text_content: pwd,
         }
     }
 }
@@ -52,11 +56,14 @@ impl PopupApp {
             Message::Exit => {
                 return window::latest().and_then(window::close);
             },
-            Message::TrayMenuClicked(_id) => {
+            Message::GenerateId => {
+                self.text_content = generate_password();
+                copy_text(&self.text_content);
+                
                 // Show the window and then bring it to the front
                 return window::latest()
-                    .and_then::<Option<window::Id>>(|id| window::set_mode(id, window::Mode::Windowed))
-                    .and_then(|id| window::gain_focus(id));
+                    .and_then(|id| window::set_mode(id, window::Mode::Windowed))
+                    .chain(window::latest().and_then(|id| window::gain_focus(id)))
             }
             Message::TextChanged(new_text) => {
                 self.text_content = new_text;
@@ -66,14 +73,19 @@ impl PopupApp {
     }
 
     fn view(&self) -> Element<'_, Message> {
+        // let font = Font { family: (), weight: (), stretch: (), style: () };
+        // let font = Font::default();
+        // font.family = iced::font::Family::Name("()");
+        
         let input = text_input("Type context here...", &self.text_content)
+            .size(14)
             .on_input(Message::TextChanged)
-            .padding(10);
+            .padding(5);
 
         container(
             column![
                 input,
-                button("Exit").padding([10, 20]).on_press(Message::Exit),
+                //button("Exit").padding([10, 20]).on_press(Message::Exit),
                 ]
                 .spacing(10)
                 .align_x(Alignment::Center)
@@ -126,10 +138,11 @@ impl PopupApp {
                     gtk::init().expect("Failed to initialize GTK on tray thread");
 
                     let tray_menu = Menu::new();
-                    let _generate_item = MenuItem::new("Generate Password", true, None);
-                    let _ = tray_menu.append(&_generate_item);
+                    let generate_item = MenuItem::new("Generate Password", true, None);
+                    tray_menu.append(&generate_item).expect("tray_menu.append(&generate_item) failure");
+                    let generate_id = generate_item.id();
                     let exit_item = MenuItem::new("Exit", true, None);
-                    let _ = tray_menu.append(&exit_item);
+                    tray_menu.append(&exit_item).expect("tray_menu.append(&exit_item) failure");
                     let exit_id = exit_item.id();
 
                     let icon = load_icon();
@@ -158,7 +171,9 @@ impl PopupApp {
 
                         if let Some(event) = event_receiver.try_iter().next() {
                             if event.id()==exit_id {
-                                let _ = tx.send(Message::Exit);
+                                tx.send(Message::Exit).expect("tx.send(Message::Exit) error");
+                            } else if event.id()==generate_id {
+                                tx.send(Message::GenerateId).expect("tx.send(Message::GenerateId) error");
                             }
                         }
                         std::thread::sleep(std::time::Duration::from_millis(16));
@@ -204,16 +219,16 @@ fn generate_password() -> String {
         .map(|i| LOWER_CASE[i])
         .collect();
     pwd.extend(chars);
-    let chars:Vec<_> = index::sample(&mut rng, UPPER_CASE.len(), num_upper).iter()
-        .map(|i| UPPER_CASE[i])
-        .collect();
-    pwd.extend(chars);
     let chars:Vec<_> = index::sample(&mut rng, NUMERIC.len(), num_numeric).iter()
         .map(|i| NUMERIC[i])
         .collect();
     pwd.extend(chars);
     let chars:Vec<_> = index::sample(&mut rng, SPECIAL.len(), num_special).iter()
         .map(|i| SPECIAL[i])
+        .collect();
+    pwd.extend(chars);
+    let chars:Vec<_> = index::sample(&mut rng, UPPER_CASE.len(), num_upper).iter()
+        .map(|i| UPPER_CASE[i])
         .collect();
     pwd.extend(chars);
 

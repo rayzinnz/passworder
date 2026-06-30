@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+helper_lib = { git = "https://github.com/rayzinnz/rust-helper-lib.git", features = ["clipboard"] }
 iced = "0.14"
 image = "0.25"
 rand = "0.10"
