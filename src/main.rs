@@ -17,6 +17,7 @@ pub fn main() -> iced::Result {
         .window(window::Settings {
             size: (300.0, 40.0).into(),
             decorations: false,
+            exit_on_close_request: false,
             ..Default::default()
         })
         .subscription(PopupApp::subscription)
@@ -50,8 +51,10 @@ impl PopupApp {
         match message {
             Message::EscPressed => {
                 // Hide the window when ESC is pressed
+                // return window::latest()
+                //     .and_then(|id| window::set_mode(id, window::Mode::Hidden));
                 return window::latest()
-                    .and_then(|id| window::set_mode(id, window::Mode::Hidden));
+                    .and_then(|id| window::close(id));
             }
             Message::Exit => {
                 return window::latest().and_then(window::close);
